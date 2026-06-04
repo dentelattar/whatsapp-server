@@ -321,17 +321,25 @@ app.get('/api/chats', async (req, res) => {
   const userId = resolveUserFromReq(req);
   const state = getUserState(userId);
   if (!state.client) return res.status(503).json({ error: 'Client not started' });
-  if (!state.cachedChats) return res.status(503).json({ error: 'Chats not yet loaded' });
-  res.json(state.cachedChats.map(c => ({
-    id: c.id._serialized,
-    user: c.id.user,
-    name: c.name || c.id._serialized,
-    unreadCount: c.unreadCount,
-    lastMessage: c.lastMessage ? {
-      body: (c.lastMessage.body || '(media)').slice(0, 80),
-      timestamp: c.lastMessage.timestamp,
-    } : null,
-  })));
+  try {
+    const chats = state.cachedChats || await Promise.race([
+      state.client.getChats(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+    ]);
+    state.cachedChats = chats;
+    res.json(chats.map(c => ({
+      id: c.id._serialized,
+      user: c.id.user,
+      name: c.name || c.id._serialized,
+      unreadCount: c.unreadCount,
+      lastMessage: c.lastMessage ? {
+        body: (c.lastMessage.body || '(media)').slice(0, 80),
+        timestamp: c.lastMessage.timestamp,
+      } : null,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/messages/:chatId', async (req, res) => {
@@ -454,18 +462,25 @@ app.get('/api/:userId/chats', authMiddleware, async (req, res) => {
   const state = getUserState(userId);
   const client = state.client;
   if (!client) return res.status(503).json({ error: 'Client not started' });
-  if (!state.cachedChats) return res.status(503).json({ error: 'Chats not yet loaded' });
-  const result = state.cachedChats.map(c => ({
-    id: c.id._serialized,
-    user: c.id.user,
-    name: c.name || c.id._serialized,
-    unreadCount: c.unreadCount,
-    lastMessage: c.lastMessage ? {
-      body: (c.lastMessage.body || '(media)').slice(0, 80),
-      timestamp: c.lastMessage.timestamp,
-    } : null,
-  }));
-  res.json(result);
+  try {
+    const chats = state.cachedChats || await Promise.race([
+      client.getChats(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+    ]);
+    state.cachedChats = chats;
+    res.json(chats.map(c => ({
+      id: c.id._serialized,
+      user: c.id.user,
+      name: c.name || c.id._serialized,
+      unreadCount: c.unreadCount,
+      lastMessage: c.lastMessage ? {
+        body: (c.lastMessage.body || '(media)').slice(0, 80),
+        timestamp: c.lastMessage.timestamp,
+      } : null,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/:userId/messages/:chatId', authMiddleware, async (req, res) => {
