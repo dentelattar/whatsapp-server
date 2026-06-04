@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhatsApp Server – Multi-User</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #111b21; color: #e9edef; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+h1 { font-size: 20px; font-weight: 700; color: #00a884; }
+.header { width: 100%; max-width: 600px; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; }
+.status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.off { background: #dc3545; }
+.dot.on { background: #00a884; }
+.dot.wait { background: #ffc107; }
+.qr-box { background: #1f2c33; padding: 30px; border-radius: 12px; text-align: center; }
+.qr-box img { width: 220px; height: 220px; border-radius: 8px; }
+.qr-box h2 { font-size: 16px; margin-bottom: 16px; }
+.qr-box p { font-size: 13px; color: #8696a0; margin-top: 12px; }
+.spinner { width: 32px; height: 32px; border: 3px solid #2a3942; border-top-color: #00a884; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 20px auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn { padding: 10px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; background: #00a884; color: #111b21; }
+.btn:hover { background: #06cf9c; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.danger { background: #dc3545; color: white; }
+.btn.danger:hover { background: #e04a5a; }
+.btn.small { padding: 6px 16px; font-size: 12px; }
+.btn.outline { background: transparent; border: 1px solid #00a884; color: #00a884; }
+.btn.outline:hover { background: #00a88422; }
+.info { font-size: 12px; color: #8696a0; max-width: 400px; text-align: center; line-height: 1.5; }
+.hidden { display: none !important; }
+
+/* Login screen */
+#loginScreen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; min-height: 100vh; padding: 20px; }
+#loginScreen h1 { font-size: 28px; margin-bottom: 8px; }
+#loginScreen .subtitle { color: #8696a0; font-size: 14px; margin-bottom: 8px; text-align: center; }
+.login-box { background: #1f2c33; padding: 32px; border-radius: 16px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 16px; }
+.login-box label { font-size: 13px; color: #8696a0; }
+.login-box input { padding: 12px 16px; border: 1px solid #2a3942; border-radius: 8px; background: #2a3942; color: #e9edef; font-size: 15px; outline: none; }
+.login-box input:focus { border-color: #00a884; }
+.login-hint { font-size: 12px; color: #8696a0; text-align: center; }
+.user-list { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
+.user-btn { padding: 8px 18px; border: 1px solid #2a3942; border-radius: 8px; background: #1f2c33; color: #e9edef; cursor: pointer; font-size: 13px; }
+.user-btn:hover { border-color: #00a884; }
+
+/* Dashboard */
+#dashboard { display: none; width: 100%; max-width: 600px; flex-direction: column; align-items: center; padding: 0 20px 40px; gap: 24px; }
+.user-badge { display: flex; align-items: center; gap: 8px; background: #1f2c33; padding: 6px 14px 6px 10px; border-radius: 20px; font-size: 13px; }
+.user-badge .avatar { width: 26px; height: 26px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #111b21; }
+.card { background: #1f2c33; border-radius: 16px; padding: 24px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.controls-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+/* Switch user dropdown */
+.switch-bar { width: 100%; max-width: 600px; display: flex; gap: 8px; align-items: center; padding: 12px 20px 0; }
+.switch-bar select { flex: 1; padding: 8px 12px; border: 1px solid #2a3942; border-radius: 8px; background: #1f2c33; color: #e9edef; font-size: 13px; outline: none; }
+.switch-bar select:focus { border-color: #00a884; }
+</style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="loginScreen">
+  <h1>WhatsApp Server</h1>
+  <p class="subtitle">Connect your clinic's WhatsApp to SuperDent</p>
+  <div class="login-box">
+    <label>Enter your User ID</label>
+    <input type="text" id="userIdInput" placeholder="e.g. clinic1" autocomplete="off" />
+    <button class="btn" id="loginBtn">Connect</button>
+    <div id="userQuickList" class="user-list hidden"></div>
+  </div>
+  <p class="login-hint">Each clinic/dentist needs their own User ID.<br>Your ID is provided by your administrator.</p>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+  <div class="header">
+    <h1>WhatsApp Server</h1>
+    <div class="user-badge">
+      <div class="avatar" id="userAvatar">U</div>
+      <span id="userBadgeName">user</span>
+      <button class="btn small outline" onclick="switchUser()">Switch</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="status">
+      <span class="dot off" id="statusDot"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+
+    <div class="qr-box" id="qrBox">
+      <h2>Scan QR Code</h2>
+      <img id="qrImage" src="" alt="QR">
+      <p>Open WhatsApp → Linked Devices → Link a Device</p>
+    </div>
+
+    <div id="spinner" class="spinner hidden"></div>
+
+    <div class="controls-row" id="controls">
+      <button class="btn" id="btnStart" onclick="startClient()">Start WhatsApp</button>
+      <button class="btn danger hidden" id="btnLogout" onclick="logout()">Logout</button>
+    </div>
+
+    <div class="info" id="infoText">
+      SuperDent connects automatically. Keep this tab open while using WhatsApp.
+    </div>
+  </div>
+</div>
+
+<script>
+const socket = io({ transports: ['websocket', 'polling'] });
+const dot = document.getElementById('statusDot');
+const st = document.getElementById('statusText');
+const qrBox = document.getElementById('qrBox');
+const qrImg = document.getElementById('qrImage');
+const spin = document.getElementById('spinner');
+const btnStart = document.getElementById('btnStart');
+const btnLogout = document.getElementById('btnLogout');
+const userIdInput = document.getElementById('userIdInput');
+const loginBtn = document.getElementById('loginBtn');
+const loginScreen = document.getElementById('loginScreen');
+const dashboard = document.getElementById('dashboard');
+const userBadgeName = document.getElementById('userBadgeName');
+const userAvatar = document.getElementById('userAvatar');
+const userQuickList = document.getElementById('userQuickList');
+
+let currentUser = null;
+let savedUserIds = [];
+
+try {
+  savedUserIds = JSON.parse(localStorage.getItem('wsp_users') || '[]');
+  if (savedUserIds.length) {
+    userQuickList.classList.remove('hidden');
+    userQuickList.innerHTML = savedUserIds.map(u =>
+      `<button class="user-btn" onclick="selectUser('${u}')">${u}</button>`
+    ).join('');
+    userIdInput.placeholder = 'or type a new ID...';
+  }
+} catch {}
+
+function saveUserId(id) {
+  if (!savedUserIds.includes(id)) {
+    savedUserIds.unshift(id);
+    if (savedUserIds.length > 10) savedUserIds.pop();
+    localStorage.setItem('wsp_users', JSON.stringify(savedUserIds));
+  }
+}
+
+function selectUser(id) {
+  userIdInput.value = id;
+  doLogin();
+}
+
+loginBtn.addEventListener('click', doLogin);
+userIdInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+function doLogin() {
+  const id = userIdInput.value.trim();
+  if (!id) return;
+  currentUser = id;
+  saveUserId(id);
+  loginScreen.style.display = 'none';
+  dashboard.style.display = 'flex';
+  userBadgeName.textContent = id;
+  userAvatar.textContent = id.charAt(0).toUpperCase();
+  setStatus(false, 'Connecting to server...');
+
+  socket.emit('register', id);
+  socket.emit('start');
+  fetchStatus();
+}
+
+function switchUser() {
+  if (currentUser && !confirm('Switch user? This will not log out your WhatsApp.')) return;
+  dashboard.style.display = 'none';
+  loginScreen.style.display = 'flex';
+  userIdInput.value = '';
+  userIdInput.focus();
+}
+
+function fetchStatus() {
+  if (!currentUser) return;
+  fetch(`/api/${currentUser}/status`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.connected) {
+        setStatus(true, 'Connected');
+        btnStart.classList.add('hidden');
+        btnLogout.classList.remove('hidden');
+        qrBox.classList.remove('active');
+        spin.classList.add('hidden');
+      } else {
+        setStatus(false, 'Disconnected');
+        btnStart.classList.remove('hidden');
+        btnLogout.classList.add('hidden');
+      }
+    })
+    .catch(() => {});
+}
+
+function setStatus(ok, text) {
+  dot.className = 'dot ' + (ok ? 'on' : text === 'Connecting' || text === 'Starting...' ? 'wait' : 'off');
+  st.textContent = text;
+}
+
+socket.on('connect', () => {
+  if (currentUser) {
+    setStatus(false, 'Connected to server');
+    socket.emit('register', currentUser);
+  }
+});
+
+socket.on('qr', (dataUrl) => {
+  qrBox.classList.add('active');
+  qrImg.src = dataUrl;
+  spin.classList.add('hidden');
+  setStatus(false, 'Scan QR Code');
+});
+
+socket.on('authenticated', () => {
+  qrBox.classList.remove('active');
+  setStatus(false, 'Authenticated');
+});
+
+socket.on('ready', () => {
+  setStatus(true, 'Connected');
+  spin.classList.add('hidden');
+  qrBox.classList.remove('active');
+  btnStart.classList.add('hidden');
+  btnLogout.classList.remove('hidden');
+});
+
+socket.on('disconnected', () => {
+  setStatus(false, 'Disconnected');
+  qrBox.classList.remove('active');
+  btnStart.classList.remove('hidden');
+  btnLogout.classList.add('hidden');
+});
+
+socket.on('auth_failure', () => {
+  setStatus(false, 'Auth Failed');
+  qrBox.classList.remove('active');
+  spin.classList.add('hidden');
+  btnStart.classList.remove('hidden');
+  btnLogout.classList.add('hidden');
+});
+
+socket.on('logged_out', () => {
+  setStatus(false, 'Logged out');
+  qrBox.classList.remove('active');
+  btnStart.classList.remove('hidden');
+  btnLogout.classList.add('hidden');
+});
+
+socket.on('error', (msg) => {
+  alert('Error: ' + msg);
+});
+
+function startClient() {
+  qrBox.classList.remove('active');
+  spin.classList.remove('hidden');
+  setStatus(false, 'Starting...');
+  btnStart.disabled = true;
+  socket.emit('start');
+  setTimeout(() => { btnStart.disabled = false; }, 3000);
+}
+
+function logout() {
+  if (!currentUser || !confirm('Logout and disconnect WhatsApp for ' + currentUser + '?')) return;
+  socket.emit('logout');
+  setStatus(false, 'Disconnected');
+  btnStart.classList.remove('hidden');
+  btnLogout.classList.add('hidden');
+  qrBox.classList.remove('active');
+}
+</script>
+</body>
+</html>
