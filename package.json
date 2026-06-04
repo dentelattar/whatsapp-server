@@ -7,10 +7,14 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "express": "^4.21.2",
+    "firebase-admin": "^13.9.0",
+    "fs-extra": "^11.3.0",
     "puppeteer": "^24.38.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3",
+    "unzipper": "^0.12.3",
     "whatsapp-web.js": "^1.34.7"
   }
 }

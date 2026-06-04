@@ -3,8 +3,37 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { Server } = require('socket.io');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, RemoteAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
+const { initializeApp, getApps, cert } = require('firebase-admin/app');
+const { getDatabase } = require('firebase-admin/database');
+const FirebaseStore = require('./FirebaseStore');
+
+let firebaseDb = null;
+function initFirebase() {
+  if (firebaseDb) return firebaseDb;
+  if (getApps().length > 0) {
+    firebaseDb = getDatabase();
+    return firebaseDb;
+  }
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) {
+    console.warn('FIREBASE_SERVICE_ACCOUNT not set — WhatsApp sessions will NOT persist across restarts!');
+    return null;
+  }
+  try {
+    const serviceAccount = JSON.parse(Buffer.from(raw, 'base64').toString());
+    initializeApp({
+      credential: cert(serviceAccount),
+      databaseURL: `https://${serviceAccount.project_id}-default-rtdb.firebaseio.com`,
+    });
+    firebaseDb = getDatabase();
+    console.log('Firebase RTDB initialized for session storage');
+  } catch (err) {
+    console.error('Firebase init failed:', err.message);
+  }
+  return firebaseDb;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -88,8 +117,25 @@ function startClient(userId) {
   console.log(`[${userId}] Starting WhatsApp client...`);
 
   const authDir = ensureUserDir(userId);
+  const db = initFirebase();
+  let authStrategy;
+  if (db) {
+    const store = new FirebaseStore({ db, userId, dataPath: authDir });
+    authStrategy = new RemoteAuth({
+      store,
+      clientId: userId,
+      dataPath: authDir,
+      backupSyncIntervalMs: 60000,
+    });
+    console.log(`[${userId}] Using RemoteAuth with Firebase`);
+  } else {
+    const { LocalAuth } = require('whatsapp-web.js');
+    authStrategy = new LocalAuth({ dataPath: authDir });
+    console.log(`[${userId}] Using LocalAuth (no Firebase configured)`);
+  }
+
   const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: authDir }),
+    authStrategy,
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
