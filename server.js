@@ -172,7 +172,7 @@ function startClient(userId) {
       try {
         const chats = await Promise.race([
           client.getChats(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
         ]);
         state.cachedChats = chats;
         console.log(`[${userId}] Cached ${chats.length} chats`);
@@ -188,7 +188,7 @@ function startClient(userId) {
         return;
       } catch (err) {
         console.error(`[${userId}] Error fetching chats (attempt ${attempt + 1}):`, err.message);
-        if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
+        if (attempt < 2) await new Promise(r => setTimeout(r, 5000));
       }
     }
     console.error(`[${userId}] Failed to fetch chats after all attempts`);
@@ -363,15 +363,19 @@ app.post('/api/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+async function fetchChats(client) {
+  return Promise.race([
+    client.getChats(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
+  ]);
+}
+
 app.get('/api/chats', async (req, res) => {
   const userId = resolveUserFromReq(req);
   const state = getUserState(userId);
   if (!state.client) return res.status(503).json({ error: 'Client not started' });
   try {
-    const chats = state.cachedChats || await Promise.race([
-      state.client.getChats(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
-    ]);
+    const chats = state.cachedChats || await fetchChats(state.client);
     state.cachedChats = chats;
     res.json(chats.map(c => ({
       id: c.id._serialized,
@@ -384,7 +388,8 @@ app.get('/api/chats', async (req, res) => {
       } : null,
     })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`[${userId}] /api/chats failed:`, err.message);
+    res.json([]);
   }
 });
 
@@ -509,10 +514,7 @@ app.get('/api/:userId/chats', authMiddleware, async (req, res) => {
   const client = state.client;
   if (!client) return res.status(503).json({ error: 'Client not started' });
   try {
-    const chats = state.cachedChats || await Promise.race([
-      client.getChats(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
-    ]);
+    const chats = state.cachedChats || await fetchChats(client);
     state.cachedChats = chats;
     res.json(chats.map(c => ({
       id: c.id._serialized,
@@ -525,7 +527,8 @@ app.get('/api/:userId/chats', authMiddleware, async (req, res) => {
       } : null,
     })));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`[${userId}] /api/chats failed:`, err.message);
+    res.json([]);
   }
 });
 
