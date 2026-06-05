@@ -138,8 +138,9 @@ function startClient(userId) {
     authStrategy,
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      protocolTimeout: 120000,
     },
   });
 
@@ -172,7 +173,7 @@ function startClient(userId) {
       try {
         const chats = await Promise.race([
           client.getChats(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000)),
         ]);
         state.cachedChats = chats;
         console.log(`[${userId}] Cached ${chats.length} chats`);
@@ -366,7 +367,7 @@ app.post('/api/logout', async (req, res) => {
 async function fetchChats(client) {
   return Promise.race([
     client.getChats(),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000)),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 60000)),
   ]);
 }
 
@@ -428,11 +429,14 @@ app.post('/api/send', async (req, res) => {
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
         ]);
         if (resolved) {
-          await doSend(client, resolved._serialized || String(resolved), message);
+          const jid = resolved._serialized || String(resolved);
+          await doSend(client, jid, message);
+          storeSentMessage(firebaseDb, userId, { chatId, message, name, to: jid });
           return res.json({ success: true });
         }
       } catch {}
       await doSend(client, chatId, message);
+      storeSentMessage(firebaseDb, userId, { chatId, message, name, to: chatId });
       return res.json({ success: true });
     }
     if (name && state.cachedChats) {
@@ -442,7 +446,9 @@ app.post('/api/send', async (req, res) => {
         return c.name.toLowerCase().trim().includes(nameLower) || nameLower.includes(c.name.toLowerCase().trim());
       });
       if (match) {
-        await doSend(client, match.id._serialized, message);
+        const jid = match.id._serialized;
+        await doSend(client, jid, message);
+        storeSentMessage(firebaseDb, userId, { chatId, message, name, to: jid });
         return res.json({ success: true });
       }
     }
@@ -456,12 +462,14 @@ app.post('/api/send', async (req, res) => {
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
         ]);
         if (resolved) {
-          await doSend(client, resolved._serialized || String(resolved), message);
+          const jid = resolved._serialized || String(resolved);
+          await doSend(client, jid, message);
+          storeSentMessage(firebaseDb, userId, { chatId, message, name, to: jid });
           return res.json({ success: true });
         }
       } catch {}
     }
-    res.status(400).json({ error: 'Could not find this contact in WhatsApp. Make sure the number is registered and you have a chat with them.' });
+    res.status(400).json({ error: 'Could not find this contact in WhatsApp.' });
   } catch (err) {
     if ((err.message || '').includes('No LID')) {
       return res.status(400).json({ error: 'Cannot find this contact. Make sure the number is registered on WhatsApp.' });
@@ -559,6 +567,23 @@ async function doSend(client, jid, message) {
   ]);
 }
 
+async function storeSentMessage(db, userId, { chatId, message, name, to }) {
+  if (!db) return;
+  try {
+    const msgRef = db.ref(`whatsappMessages/${userId}`).push();
+    await msgRef.set({
+      chatId,
+      to: to || chatId,
+      body: message,
+      name: name || '',
+      timestamp: Date.now(),
+      fromMe: true,
+    });
+  } catch (err) {
+    console.error(`[${userId}] Failed to store sent message:`, err.message);
+  }
+}
+
 app.post('/api/:userId/send', authMiddleware, async (req, res) => {
   const { userId } = req.params;
   const state = getUserState(userId);
@@ -580,10 +605,12 @@ app.post('/api/:userId/send', authMiddleware, async (req, res) => {
         if (resolved) {
           const jid = resolved._serialized || String(resolved);
           await doSend(client, jid, message);
+          storeSentMessage(firebaseDb, userId, { chatId, message, name, to: jid });
           return res.json({ success: true });
         }
       } catch {}
       await doSend(client, chatId, message);
+      storeSentMessage(firebaseDb, userId, { chatId, message, name, to: chatId });
       return res.json({ success: true });
     }
 
@@ -594,7 +621,9 @@ app.post('/api/:userId/send', authMiddleware, async (req, res) => {
         return c.name.toLowerCase().trim().includes(nameLower) || nameLower.includes(c.name.toLowerCase().trim());
       });
       if (match) {
-        await doSend(client, match.id._serialized, message);
+        const jid = match.id._serialized;
+        await doSend(client, jid, message);
+        storeSentMessage(firebaseDb, userId, { chatId, message, name, to: jid });
         return res.json({ success: true });
       }
     }
@@ -611,6 +640,7 @@ app.post('/api/:userId/send', authMiddleware, async (req, res) => {
         if (resolved) {
           const jid = resolved._serialized || String(resolved);
           await doSend(client, jid, message);
+          storeSentMessage(firebaseDb, userId, { chatId, message, name, to: jid });
           return res.json({ success: true });
         }
       } catch {}

@@ -1,6 +1,8 @@
 const fs = require('fs-extra');
 const path = require('path');
 
+const CHUNK_SIZE = 512 * 1024; // 512KB per chunk — well under 10MB Firebase limit
+
 class FirebaseStore {
   constructor({ db, userId, dataPath }) {
     this.db = db;
@@ -19,13 +21,26 @@ class FirebaseStore {
     const exists = await fs.pathExists(zipPath);
     if (!exists) return;
     const data = await fs.readFile(zipPath);
-    await this.ref(session).set(data.toString('base64'));
+    const base64 = data.toString('base64');
+    const chunks = [];
+    for (let i = 0; i < base64.length; i += CHUNK_SIZE) {
+      chunks.push(base64.slice(i, i + CHUNK_SIZE));
+    }
+    const payload = { chunks, count: chunks.length };
+    await this.ref(session).set(payload);
   }
 
   async extract({ session, path: destPath }) {
     const snap = await this.ref(session).once('value');
     if (!snap.exists()) return;
-    const buf = Buffer.from(snap.val(), 'base64');
+    const val = snap.val();
+    let base64;
+    if (val.chunks) {
+      base64 = val.chunks.join('');
+    } else {
+      base64 = val;
+    }
+    const buf = Buffer.from(base64, 'base64');
     await fs.writeFile(destPath, buf);
   }
 
