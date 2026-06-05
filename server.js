@@ -109,7 +109,7 @@ function emitToAll(event, data) {
   }
 }
 
-function startClient(userId) {
+async function startClient(userId) {
   const state = getUserState(userId);
   if (state.client || state.isStarting) return;
   state.isStarting = true;
@@ -140,6 +140,7 @@ function startClient(userId) {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      protocolTimeout: 180000, // 180 seconds — default 30s causes ProtocolError under load
     },
   });
 
@@ -219,7 +220,11 @@ function startClient(userId) {
   });
 
   state.client = client;
-  client.initialize();
+  try {
+    await client.initialize();
+  } catch (err) {
+    console.error(`[${userId}] client.initialize() failed:`, err);
+  }
 }
 
 io.on('connection', (socket) => {
