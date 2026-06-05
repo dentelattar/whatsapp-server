@@ -70,7 +70,7 @@ h1 { font-size: 20px; font-weight: 700; color: #00a884; }
     <button class="btn" id="loginBtn">Connect</button>
     <div id="userQuickList" class="user-list hidden"></div>
   </div>
-  <p class="login-hint">Each clinic/dentist needs their own User ID.<br>Your ID is provided by your administrator.</p>
+  <p class="login-hint">Each clinic has its own WhatsApp connection.<br>Your Clinic ID is provided by your administrator.</p>
 </div>
 
 <!-- Dashboard -->
@@ -155,6 +155,13 @@ function selectUser(id) {
 
 loginBtn.addEventListener('click', doLogin);
 userIdInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+const urlParams = new URLSearchParams(window.location.search);
+const urlClinicId = urlParams.get('clinicId');
+if (urlClinicId) {
+  userIdInput.value = urlClinicId;
+  setTimeout(doLogin, 300);
+}
 
 function doLogin() {
   const id = userIdInput.value.trim();

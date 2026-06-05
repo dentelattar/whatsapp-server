@@ -322,7 +322,7 @@ io.on('connection', (socket) => {
 });
 
 function resolveUserFromReq(req) {
-  return req.headers['x-user-id'] || req.query.userId || process.env.DEFAULT_USER_ID || 'default';
+  return req.headers['x-user-id'] || req.query.userId || req.query.clinicId || process.env.DEFAULT_USER_ID || 'default';
 }
 
 // ── Backward-compatible routes (no userId in URL, uses x-user-id header or DEFAULT_USER_ID) ──
